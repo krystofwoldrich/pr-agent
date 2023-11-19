@@ -1,0 +1,54 @@
+{
+  "name": "pr-agent",
+  "displayName": "PR Agent",
+  "description": "Get a next pull request number right in your editor!",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "pr-agent.helloWorld",
+        "title": "Hello World"
+      },
+      {
+        "command": "pr-agent.nextPullLink",
+        "title": "PR Agent: Next Pull Request Link Markdown"
+      },
+      {
+        "command": "pr-agent.clearExtensionSecrets",
+        "title": "PR Agent: Clear Extension Secrets"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "pnpm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "pnpm run compile && pnpm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/ini": "^1.3.33",
+    "@types/mocha": "^10.0.3",
+    "@types/node": "18.x",
+    "@types/vscode": "^1.84.0",
+    "@typescript-eslint/eslint-plugin": "^6.9.0",
+    "@typescript-eslint/parser": "^6.9.0",
+    "@vscode/test-electron": "^2.3.6",
+    "eslint": "^8.52.0",
+    "glob": "^10.3.10",
+    "mocha": "^10.2.0",
+    "typescript": "^5.2.2"
+  },
+  "dependencies": {
+    "ini": "^4.1.1"
+  }
+}
