@@ -11,3 +11,7 @@ Is a simple extension that creates a link to your next pull request. This might 
 ## Changelog
 
 - feat(command): Next PR Markdown link ([#1](https://github.com/krystofwoldrich/pr-agent/pull/1))
+
+## Thank you and recognition
+
+Thank you https://github.com/ichard26/next-pr-number for the inspiration for this extension. I used the website many, many times.
