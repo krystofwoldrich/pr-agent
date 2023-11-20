@@ -9,14 +9,16 @@
   "categories": [
     "Other"
   ],
+  "publisher": "krystofwoldrich",
   "activationEvents": [],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krystofwoldrich/pr-agent.git"
+  },
+  "icon": "images/pr-agent-icon.png",
   "main": "./out/main.js",
   "contributes": {
     "commands": [
-      {
-        "command": "pr-agent.helloWorld",
-        "title": "Hello World"
-      },
       {
         "command": "pr-agent.nextPullLink",
         "title": "PR Agent: Next Pull Request Link Markdown"
