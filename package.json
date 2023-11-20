@@ -2,7 +2,7 @@
   "name": "pr-agent",
   "displayName": "PR Agent",
   "description": "Get a next pull request number right in your editor!",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.84.0"
   },
