@@ -11,6 +11,7 @@ Is a simple extension that creates a link to your next pull request. This might 
 ## Changelog
 
 - feat(command): Next PR Markdown link ([#1](https://github.com/krystofwoldrich/pr-agent/pull/1))
+- feat(command): Next PR Markdown number (#2)
 
 ## Thank you and recognition
 

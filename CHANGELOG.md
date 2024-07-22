@@ -6,4 +6,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-- Initial release
+- feat(command): Next PR Markdown number (#2)
+
+## 0.0.2
+
+- feat(command): Next PR Markdown link ([#1](https://github.com/krystofwoldrich/pr-agent/pull/1))
