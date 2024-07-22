@@ -4,13 +4,17 @@ import * as vscode from 'vscode';
 import { getRemotes, isGitRepository, parseGitConfig, parseRemoteUrl } from './git';
 import { clearGithubToken, getGithubToken } from './secrets';
 import { GitHubResponse, getLatestNumbers } from './api';
-import { getMarkDownTemplate } from './template';
+import { getMarkDownTemplate, getMarkDownTemplateOnlyNumber } from './template';
 
 export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'pr-agent.nextPullLink',
-      () => nextPullLink(context),
+      () => nextPullRequest(context, { style: 'link' }),
+    ),
+    vscode.commands.registerCommand(
+      'pr-agent.nextPullNumber',
+      () => nextPullRequest(context, { style: 'number' }),
     ),
     vscode.commands.registerCommand(
       'pr-agent.clearExtensionSecrets',
@@ -26,7 +30,12 @@ async function clearExtensionSecrets(context: vscode.ExtensionContext) {
   vscode.window.showInformationMessage('Extension secrets cleared.');
 }
 
-async function nextPullLink(context: vscode.ExtensionContext) {
+async function nextPullRequest(
+  context: vscode.ExtensionContext,
+  options: {
+    style: 'number' | 'link';
+  },
+) {
   const cursor = vscode.window.activeTextEditor?.selection.active;
   if (!cursor) {
     return;
@@ -75,9 +84,56 @@ async function nextPullLink(context: vscode.ExtensionContext) {
 
   const current = getCurrentLatestNumber(data);
   const next = current + 1;
+
+  let maybeContent: string | undefined = undefined;
+  try {
+    maybeContent = getFinalContent(
+      {
+        nextPullNumber: next,
+        repoOwner: parsedRemoteUrl.owner,
+        repoName: parsedRemoteUrl.name,
+      },
+      options,
+    );
+  } catch (error) {
+    if (error instanceof Error) {
+      vscode.window.showErrorMessage(error.message);
+    } else {
+      vscode.window.showErrorMessage('Unknown error during content creation.');
+    }
+    return;
+  }
+
+  const finalContent = maybeContent;
+  if (!finalContent) {
+    vscode.window.showErrorMessage('Could not create content.');
+    return;
+  }
+
   vscode.window.activeTextEditor?.edit(editBuilder => {
-    editBuilder.insert(cursor, getMarkDownTemplate(next, parsedRemoteUrl.owner, parsedRemoteUrl.name));
+    editBuilder.insert(cursor, finalContent);
   });
+}
+
+function getFinalContent(
+  content: {
+    nextPullNumber: number;
+    repoOwner: string;
+    repoName: string;
+  },
+  options: {
+    style: 'number' | 'link';
+  },
+): string {
+  if (options.style === 'number') {
+    return getMarkDownTemplateOnlyNumber(content.nextPullNumber);
+  }
+
+  if (options.style === 'link') {
+    return getMarkDownTemplate(content.nextPullNumber, content.repoOwner, content.repoName);
+  }
+
+  throw new Error('Unknown style. Can not create content.');
 }
 
 function getCurrentLatestNumber(data: GitHubResponse['data']) {

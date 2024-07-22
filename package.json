@@ -20,6 +20,10 @@
   "contributes": {
     "commands": [
       {
+        "command": "pr-agent.nextPullNumber",
+        "title": "PR Agent: Next Pull Request Number"
+      },
+      {
         "command": "pr-agent.nextPullLink",
         "title": "PR Agent: Next Pull Request Link Markdown"
       },
@@ -38,7 +42,7 @@
     "esbuild-watch": "npm run esbuild-base -- --sourcemap --watch",
     "test-compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "pretest": "pnpm run compile && pnpm run lint",
+    "pretest": "pnpm run test-compile && pnpm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
     "clear": "rimraf ./out"
