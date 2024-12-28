@@ -47,32 +47,15 @@ async function nextPullRequest(
     return;
   }
 
-  const dirName = path.dirname(currentlyOpenTabFilePath);
-  if (!isGitRepository(dirName)) {
-    vscode.window.showErrorMessage('Could not find GitHub repository and thus the next PR number.');
+  const remoteUrl = await getRemoteUrlFrom(currentlyOpenTabFilePath);
+  if ('errorMessage' in remoteUrl) {
+    vscode.window.showErrorMessage(remoteUrl.errorMessage);
     return;
   }
 
-  const gitConfig = parseGitConfig(dirName);
-  const gitRemotes = getRemotes(gitConfig);
-
-  const selectedRemoteKey = gitRemotes.length !== 1
-    ? await vscode.window.showQuickPick(gitRemotes)
-    : gitRemotes[0];
-  if (!selectedRemoteKey) {
-    vscode.window.showErrorMessage('No remote selected.');
-    return;
-  }
-
-  const remoteUrl = gitConfig[selectedRemoteKey].url;
-  if (!remoteUrl) {
-    vscode.window.showErrorMessage('No remote URL found.');
-    return;
-  }
-
-  const parsedRemoteUrl = parseRemoteUrl(remoteUrl);
+  const parsedRemoteUrl = parseRemoteUrl(remoteUrl.value);
   if (!parsedRemoteUrl) {
-    vscode.window.showErrorMessage('Could not parse remote URL.');
+    vscode.window.showErrorMessage(`Failed to parse remote URL ${remoteUrl.value}.`);
     return;
   }
 
@@ -113,6 +96,34 @@ async function nextPullRequest(
   vscode.window.activeTextEditor?.edit(editBuilder => {
     editBuilder.insert(cursor, finalContent);
   });
+}
+
+async function getRemoteUrlFrom(filePath: string): Promise<{
+  value: string,
+} | {
+  errorMessage: string,
+}> {
+  const dirName = path.dirname(filePath);
+  if (!isGitRepository(dirName)) {
+    return { errorMessage: `GitHub repository not found based on currently active editor (${filePath}).` };
+  }
+
+  const gitConfig = parseGitConfig(dirName);
+  const gitRemotes = getRemotes(gitConfig);
+
+  const selectedRemoteKey = gitRemotes.length !== 1
+    ? await vscode.window.showQuickPick(gitRemotes)
+    : gitRemotes[0];
+  if (!selectedRemoteKey) {
+    return { errorMessage: `No remote of ${gitRemotes.join(', ')} has been selected.` };
+  }
+
+  const remoteUrl = gitConfig[selectedRemoteKey].url;
+  if (!remoteUrl) {
+    return { errorMessage: `No remote URL found for ${selectedRemoteKey}.` };
+  }
+
+  return { value: remoteUrl };
 }
 
 function getFinalContent(
