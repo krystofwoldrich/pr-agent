@@ -1,21 +1,29 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { getRemotes, isGitRepository, parseGitConfig, parseRemoteUrl, GitConfig, GitConfigRemoteKey } from './git';
+import { getRemotes, isGitRepository, parseGitConfig, parseRemoteUrl, parseGitHead, stripRefsHeadsPrefix, getBranch, GitConfig, GitConfigRemote, GitRemote, GitConfigRemoteKey } from './git';
 import { clearGithubToken, getGithubToken } from './secrets';
-import { getLatestNumbers } from './api';
+import { getAssociatedPulls, getLatestNumbers } from './api';
 import { getMarkDownTemplate, getMarkDownTemplateOnlyNumber } from './template';
 import { Value } from './types';
 
 export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(
+      'pr-agent.nextPullNumber',
+      () => insertPull(context, { style: 'number', type: 'next' }),
+    ),
+    vscode.commands.registerCommand(
       'pr-agent.nextPullLink',
       () => insertPull(context, { style: 'link', type: 'next' }),
     ),
     vscode.commands.registerCommand(
-      'pr-agent.nextPullNumber',
-      () => insertPull(context, { style: 'number', type: 'next' }),
+      'pr-agent.currentPullNumber',
+      () => insertPull(context, { style: 'number', type: 'current' }),
+    ),
+    vscode.commands.registerCommand(
+      'pr-agent.currentPullLink',
+      () => insertPull(context, { style: 'link', type: 'current' }),
     ),
     vscode.commands.registerCommand(
       'pr-agent.clearExtensionSecrets',
@@ -35,7 +43,7 @@ async function insertPull(
   context: vscode.ExtensionContext,
   options: {
     style: 'number' | 'link';
-    type: 'next';
+    type: 'current' | 'next';
   },
 ) {
   const cursor = vscode.window.activeTextEditor?.selection.active;
@@ -71,7 +79,9 @@ async function insertPull(
 
   const token = await getGithubToken(context.secrets);
   let pullNumber = null;
-  if (options.type === 'next') {
+  if (options.type === 'current') {
+    pullNumber = await getCurrentPullNumber(currentlyOpenTabFilePath, gitConfig, token, remote, dirPath);
+  } else if (options.type === 'next') {
     const data = await getLatestNumbers(token, remote.owner, remote.name);
     if (data) {
       pullNumber = getCurrentLatestNumber(data) + 1;
@@ -100,7 +110,79 @@ async function insertPull(
   });
 }
 
-async function getRemoteUrlFrom(gitConfig: GitConfig): Promise<Value<string>> {
+async function getCurrentPullNumber(
+  currentlyOpenTabFilePath: string,
+  gitConfig: GitConfig,
+  token: string,
+  remote: GitRemote,
+  dirPath: string): Promise<number | null> {
+  const head = parseGitHead(path.dirname(currentlyOpenTabFilePath));
+  if ('commit' in head) {
+    vscode.window.showErrorMessage(`Can't retrieve pull number for detached head (${head.commit}).`);
+    return null;
+  }
+
+  const localBranchName = stripRefsHeadsPrefix(head.ref);
+  if (localBranchName === null) {
+    vscode.window.showErrorMessage(`Only \`refs/heads/\` prefix is supported at the moment. Received \`${head.ref}\`.`);
+    return null;
+  }
+
+  const remoteBranch = getBranch(gitConfig, localBranchName);
+  if (remoteBranch === null) {
+    vscode.window.showErrorMessage(`Failed to find remote branch ref for \`${head.ref}\``);
+    return null;
+  }
+  if (!remoteBranch.merge) {
+    vscode.window.showErrorMessage(`Failed to find branch \`${localBranchName}\` in \`${dirPath}\` Git Config`);
+    return null;
+  }
+
+  const remoteBranchName = stripRefsHeadsPrefix(remoteBranch.merge);
+  if (remoteBranchName === null) {
+    vscode.window.showErrorMessage(`Only \`refs/heads/\` prefix is supported at the moment. Received \`${remoteBranch.merge}\`.`);
+    return null;
+  }
+
+  const data = await getAssociatedPulls(
+    token,
+    remote.owner,
+    remote.name,
+    remoteBranchName
+  );
+
+  if (data === null) {
+    vscode.window.showErrorMessage(`Failed to retrieve associated pull requests from GitHub API.`);
+    return null;
+  }
+
+  const pullNumberValue = await getPullNumber(data);
+  if ('errorMessage' in pullNumberValue) {
+    vscode.window.showErrorMessage(pullNumberValue.errorMessage);
+    return null;
+  }
+
+  return pullNumberValue.value;
+}
+
+async function getPullNumber(data: Awaited<ReturnType<typeof getAssociatedPulls>>): Promise<Value<number>> {
+  const pulls = data?.repository.ref.associatedPullRequests.nodes || [];
+
+  const selectedPullNumber = pulls.length !== 1
+  ? (await vscode.window.showQuickPick(pulls.map(p => ({
+      label: `#${p.number} - ${p.title}`,
+      description: p.state,
+      pullNumber: p.number,
+    }))))?.pullNumber
+  : pulls[0].number;
+  if (!selectedPullNumber) {
+    return { errorMessage: `No pull of ${pulls.map(p => p.number).join(', ')} has been selected.` };
+  }
+
+  return { value: selectedPullNumber };
+}
+
+async function getRemoteUrlFrom(gitConfig: any): Promise<Value<string>> {
   const gitRemotes = getRemotes(gitConfig);
 
   const selectedRemoteKey: GitConfigRemoteKey | undefined = gitRemotes.length !== 1

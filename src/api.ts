@@ -55,6 +55,52 @@ export async function getLatestNumbers(
   );
 }
 
+export async function getAssociatedPulls(
+  token: string,
+  owner: string,
+  repository: string,
+  branch: string,
+): Promise<{
+  repository: {
+    ref: {
+      associatedPullRequests: {
+        nodes: {
+          number: number;
+          state: 'OPEN' | 'CLOSED';
+          title: string;
+          url: string;
+        }[];
+      };
+    };
+  };
+} | null> {
+  return doRequest(
+    {
+      // Note: qualifiedName matching falls back to simple name if qualified not found
+      query: `query AssociatedPulls($owner:String!, $name:String!, $branch:String!){
+        repository(owner: $owner, name: $name) {
+          ref(qualifiedName: $branch) {
+            associatedPullRequests(first: 10, states: OPEN) {
+              nodes {
+                title
+                url
+                number
+                state
+              }
+            }
+          }
+        }
+      }`,
+      variables: {
+        branch,
+        owner,
+        name: repository,
+      },
+    },
+    token,
+  );
+}
+
 async function doRequest(body: {
   query: string,
   variables: Record<string, string>,
