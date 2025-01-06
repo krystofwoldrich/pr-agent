@@ -1,20 +1,29 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { getRemotes, isGitRepository, parseGitConfig, parseRemoteUrl } from './git';
+import { getRemotes, isGitRepository, parseGitConfig, parseRemoteUrl, parseGitHead, stripRefsHeadsPrefix, getBranch, GitConfig, GitConfigRemote, GitRemote, GitConfigRemoteKey } from './git';
 import { clearGithubToken, getGithubToken } from './secrets';
-import { GitHubResponse, getLatestNumbers } from './api';
+import { getAssociatedPulls, getLatestNumbers } from './api';
 import { getMarkDownTemplate, getMarkDownTemplateOnlyNumber } from './template';
+import { Value } from './types';
 
 export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      'pr-agent.nextPullLink',
-      () => nextPullRequest(context, { style: 'link' }),
+      'pr-agent.nextPullNumber',
+      () => insertPull(context, { style: 'number', type: 'next' }),
     ),
     vscode.commands.registerCommand(
-      'pr-agent.nextPullNumber',
-      () => nextPullRequest(context, { style: 'number' }),
+      'pr-agent.nextPullLink',
+      () => insertPull(context, { style: 'link', type: 'next' }),
+    ),
+    vscode.commands.registerCommand(
+      'pr-agent.currentPullNumber',
+      () => insertPull(context, { style: 'number', type: 'current' }),
+    ),
+    vscode.commands.registerCommand(
+      'pr-agent.currentPullLink',
+      () => insertPull(context, { style: 'link', type: 'current' }),
     ),
     vscode.commands.registerCommand(
       'pr-agent.clearExtensionSecrets',
@@ -30,10 +39,11 @@ async function clearExtensionSecrets(context: vscode.ExtensionContext) {
   vscode.window.showInformationMessage('Extension secrets cleared.');
 }
 
-async function nextPullRequest(
+async function insertPull(
   context: vscode.ExtensionContext,
   options: {
     style: 'number' | 'link';
+    type: 'current' | 'next';
   },
 ) {
   const cursor = vscode.window.activeTextEditor?.selection.active;
@@ -47,96 +57,150 @@ async function nextPullRequest(
     return;
   }
 
-  const dirName = path.dirname(currentlyOpenTabFilePath);
-  if (!isGitRepository(dirName)) {
-    vscode.window.showErrorMessage('Could not find GitHub repository and thus the next PR number.');
+  const dirPath = path.dirname(currentlyOpenTabFilePath);
+  if (!isGitRepository(dirPath)) {
+    vscode.window.showErrorMessage(`GitHub repository not found based on currently active editor (${currentlyOpenTabFilePath}).`);
     return;
   }
 
-  const gitConfig = parseGitConfig(dirName);
-  const gitRemotes = getRemotes(gitConfig);
+  const gitConfig = parseGitConfig(dirPath);
 
-  const selectedRemoteKey = gitRemotes.length !== 1
-    ? await vscode.window.showQuickPick(gitRemotes)
-    : gitRemotes[0];
-  if (!selectedRemoteKey) {
-    vscode.window.showErrorMessage('No remote selected.');
+  const remoteUrl = await getRemoteUrlFrom(gitConfig);
+  if ('errorMessage' in remoteUrl) {
+    vscode.window.showErrorMessage(remoteUrl.errorMessage);
     return;
   }
 
-  const remoteUrl = gitConfig[selectedRemoteKey].url;
-  if (!remoteUrl) {
-    vscode.window.showErrorMessage('No remote URL found.');
-    return;
-  }
-
-  const parsedRemoteUrl = parseRemoteUrl(remoteUrl);
-  if (!parsedRemoteUrl) {
-    vscode.window.showErrorMessage('Could not parse remote URL.');
+  const remote = parseRemoteUrl(remoteUrl.value);
+  if (!remote) {
+    vscode.window.showErrorMessage(`Failed to parse remote URL ${remoteUrl.value}.`);
     return;
   }
 
   const token = await getGithubToken(context.secrets);
-  const data = await getLatestNumbers(token, parsedRemoteUrl.owner, parsedRemoteUrl.name);
-  if (!data) {
+  let pullNumber = null;
+  if (options.type === 'current') {
+    pullNumber = await getCurrentPullNumber(currentlyOpenTabFilePath, gitConfig, token, remote, dirPath);
+  } else if (options.type === 'next') {
+    const data = await getLatestNumbers(token, remote.owner, remote.name);
+    if (data) {
+      pullNumber = getCurrentLatestNumber(data) + 1;
+    };
+  }
+
+  if (pullNumber === null) {
+    vscode.window.showErrorMessage(`Failed to get ${options.type} pull number.`);
     return;
   }
 
-  const current = getCurrentLatestNumber(data);
-  const next = current + 1;
-
-  let maybeContent: string | undefined = undefined;
-  try {
-    maybeContent = getFinalContent(
-      {
-        nextPullNumber: next,
-        repoOwner: parsedRemoteUrl.owner,
-        repoName: parsedRemoteUrl.name,
-      },
-      options,
-    );
-  } catch (error) {
-    if (error instanceof Error) {
-      vscode.window.showErrorMessage(error.message);
-    } else {
-      vscode.window.showErrorMessage('Unknown error during content creation.');
-    }
-    return;
+  let content: string | null = null;
+  if (options.style === 'number') {
+    content = getMarkDownTemplateOnlyNumber(pullNumber);
+  } else if (options.style === 'link') {
+    content = getMarkDownTemplate(pullNumber, remote.owner, remote.name);
   }
 
-  const finalContent = maybeContent;
-  if (!finalContent) {
+  if (content === null) {
     vscode.window.showErrorMessage('Could not create content.');
     return;
   }
 
   vscode.window.activeTextEditor?.edit(editBuilder => {
-    editBuilder.insert(cursor, finalContent);
+    editBuilder.insert(cursor, content);
   });
 }
 
-function getFinalContent(
-  content: {
-    nextPullNumber: number;
-    repoOwner: string;
-    repoName: string;
-  },
-  options: {
-    style: 'number' | 'link';
-  },
-): string {
-  if (options.style === 'number') {
-    return getMarkDownTemplateOnlyNumber(content.nextPullNumber);
+async function getCurrentPullNumber(
+  currentlyOpenTabFilePath: string,
+  gitConfig: GitConfig,
+  token: string,
+  remote: GitRemote,
+  dirPath: string): Promise<number | null> {
+  const head = parseGitHead(path.dirname(currentlyOpenTabFilePath));
+  if ('commit' in head) {
+    vscode.window.showErrorMessage(`Can't retrieve pull number for detached head (${head.commit}).`);
+    return null;
   }
 
-  if (options.style === 'link') {
-    return getMarkDownTemplate(content.nextPullNumber, content.repoOwner, content.repoName);
+  const localBranchName = stripRefsHeadsPrefix(head.ref);
+  if (localBranchName === null) {
+    vscode.window.showErrorMessage(`Only \`refs/heads/\` prefix is supported at the moment. Received \`${head.ref}\`.`);
+    return null;
   }
 
-  throw new Error('Unknown style. Can not create content.');
+  const remoteBranch = getBranch(gitConfig, localBranchName);
+  if (remoteBranch === null) {
+    vscode.window.showErrorMessage(`Failed to find remote branch ref for \`${head.ref}\``);
+    return null;
+  }
+  if (!remoteBranch.merge) {
+    vscode.window.showErrorMessage(`Failed to find branch \`${localBranchName}\` in \`${dirPath}\` Git Config`);
+    return null;
+  }
+
+  const remoteBranchName = stripRefsHeadsPrefix(remoteBranch.merge);
+  if (remoteBranchName === null) {
+    vscode.window.showErrorMessage(`Only \`refs/heads/\` prefix is supported at the moment. Received \`${remoteBranch.merge}\`.`);
+    return null;
+  }
+
+  const data = await getAssociatedPulls(
+    token,
+    remote.owner,
+    remote.name,
+    remoteBranchName
+  );
+
+  if (data === null) {
+    vscode.window.showErrorMessage(`Failed to retrieve associated pull requests from GitHub API.`);
+    return null;
+  }
+
+  const pullNumberValue = await getPullNumber(data);
+  if ('errorMessage' in pullNumberValue) {
+    vscode.window.showErrorMessage(pullNumberValue.errorMessage);
+    return null;
+  }
+
+  return pullNumberValue.value;
 }
 
-function getCurrentLatestNumber(data: GitHubResponse['data']) {
+async function getPullNumber(data: Awaited<ReturnType<typeof getAssociatedPulls>>): Promise<Value<number>> {
+  const pulls = data?.repository.ref.associatedPullRequests.nodes || [];
+
+  const selectedPullNumber = pulls.length !== 1
+  ? (await vscode.window.showQuickPick(pulls.map(p => ({
+      label: `#${p.number} - ${p.title}`,
+      description: p.state,
+      pullNumber: p.number,
+    }))))?.pullNumber
+  : pulls[0].number;
+  if (!selectedPullNumber) {
+    return { errorMessage: `No pull of ${pulls.map(p => p.number).join(', ')} has been selected.` };
+  }
+
+  return { value: selectedPullNumber };
+}
+
+async function getRemoteUrlFrom(gitConfig: any): Promise<Value<string>> {
+  const gitRemotes = getRemotes(gitConfig);
+
+  const selectedRemoteKey: GitConfigRemoteKey | undefined = gitRemotes.length !== 1
+    ? await vscode.window.showQuickPick(gitRemotes) as GitConfigRemoteKey
+    : gitRemotes[0];
+  if (!selectedRemoteKey) {
+    return { errorMessage: `No remote of ${gitRemotes.join(', ')} has been selected.` };
+  }
+
+  const remoteUrl = gitConfig[selectedRemoteKey].url;
+  if (!remoteUrl) {
+    return { errorMessage: `No remote URL found for ${selectedRemoteKey}.` };
+  }
+
+  return { value: remoteUrl };
+}
+
+function getCurrentLatestNumber(data: NonNullable<Awaited<ReturnType<typeof getLatestNumbers>>>) {
   return Math.max(
     data.repository?.discussions?.nodes?.[0]?.number || 0,
     data.repository?.issues?.nodes?.[0]?.number || 0,

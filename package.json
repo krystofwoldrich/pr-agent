@@ -28,6 +28,14 @@
         "title": "PR Agent: Next Pull Request Link Markdown"
       },
       {
+        "command": "pr-agent.currentPullNumber",
+        "title": "PR Agent: Current Pull Request Number"
+      },
+      {
+        "command": "pr-agent.currentPullLink",
+        "title": "PR Agent: Current Pull Request Link Markdown"
+      },
+      {
         "command": "pr-agent.clearExtensionSecrets",
         "title": "PR Agent: Clear Extension Secrets"
       }
